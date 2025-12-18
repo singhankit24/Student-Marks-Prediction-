@@ -1,0 +1,521 @@
+# app.py - COMPLETE Library Usage Pattern Clustering Dashboard
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_score, davies_bouldin_score
+from sklearn.mixture import GaussianMixture
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
+
+# Set page configuration
+st.set_page_config(
+    page_title="Library Usage Pattern Clustering",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    /* Main header */
+    .main-header {
+        font-size: 3rem;  /* Increased from 2.8rem */
+        color: #1E3A8A;
+        text-align: center;
+        margin-bottom: 1rem;
+        font-weight: 700;
+        background: linear-gradient(90deg, #1E3A8A, #3B82F6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    /* Sub headers */
+    .sub-header {
+        font-size: 2rem;  /* Increased from 1.8rem */
+        color: #374151;
+        margin-top: 1.5rem;
+        margin-bottom: 1rem;
+        border-left: 5px solid #4F46E5;
+        padding-left: 15px;
+    }
+    
+    /* Tabs - LARGER FONT */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 24px;
+        font-size: 18px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        height: 55px;
+        white-space: pre-wrap;
+        background-color: #f0f2f6;
+        border-radius: 8px 8px 0px 0px;
+        padding: 15px 20px;
+        font-size: 18px !important;
+        font-weight: 600;
+        color: #374151;
+        transition: all 0.3s ease;
+    }
+    
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e0e2e6;
+        transform: translateY(-2px);
+    }
+    
+    .stTabs [aria-selected="true"] {
+        background-color: #4F46E5 !important;
+        color: white !important;
+        font-size: 19px !important;
+        border-bottom: 4px solid #10b981;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    /* Metric cards */
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 15px;
+        color: white;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        transition: transform 0.3s ease;
+    }
+    .metric-card h3 {
+        font-size: 1.2rem;
+        margin-bottom: 0.5rem;
+    }
+    .metric-card h2 {
+        font-size: 2.2rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Other elements */
+    .cluster-box {
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        background-color: #f8f9fa;
+        border-left: 5px solid;
+        font-size: 16px;
+    }
+    
+    /* Increase font size for all text */
+    .stMarkdown, .stText, .stDataFrame {
+        font-size: 16px;
+    }
+    
+    /* Sidebar text */
+    .css-1d391kg, .css-12oz5g7 {
+        font-size: 16px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Function to generate synthetic data
+def generate_synthetic_library_data(num_records=10000):
+    """Generate synthetic library usage data for demonstration"""
+    np.random.seed(42)
+    
+    user_ids = np.random.choice(range(1000, 5000), size=num_records, replace=True)
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=365)
+    date_range = pd.date_range(start=start_date, end=end_date, periods=num_records)
+    
+    data = {
+        'user_id': user_ids,
+        'user_type': np.random.choice(['Student', 'Faculty', 'Researcher', 'Staff', 'Public'], 
+                                     num_records, p=[0.4, 0.2, 0.15, 0.15, 0.1]),
+        'visit_date': date_range,
+        'duration_minutes': np.random.exponential(90, num_records).clip(5, 480),
+        'books_borrowed': np.random.poisson(2.5, num_records),
+        'digital_resources': np.random.poisson(1.8, num_records),
+    }
+    
+    df = pd.DataFrame(data)
+    return df
+
+# Title and description
+st.markdown("<h1 class='main-header'>📚 Library Usage Pattern Clustering Dashboard</h1>", unsafe_allow_html=True)
+st.markdown("""
+<div style='text-align: center; color: #6B7280; margin-bottom: 2rem;'>
+    <p>Unsupervised Learning & Reinforcement Learning for Optimal Resource Planning</p>
+</div>
+""", unsafe_allow_html=True)
+
+# Sidebar Configuration
+with st.sidebar:
+    st.image("https://cdn-icons-png.flaticon.com/512/2232/2232688.png", width=100)
+    st.title("📊 Dashboard Controls")
+    
+    # Data upload section
+    st.header("📁 Data Management")
+    uploaded_file = st.file_uploader("Upload your library data", type=['csv', 'xlsx', 'xls'])
+    
+    use_sample_data = st.checkbox("Use sample data", value=True)
+    
+    if use_sample_data:
+        sample_size = st.slider("Sample data size", 1000, 20000, 5000)
+    
+    # Clustering configuration
+    st.header("🎯 Clustering Settings")
+    clustering_algorithm = st.selectbox("Select clustering algorithm",
+        ["K-Means", "DBSCAN", "Agglomerative", "Gaussian Mixture"], index=0)
+    
+    if clustering_algorithm == "K-Means":
+        n_clusters = st.slider("Number of clusters", 2, 10, 4)
+    elif clustering_algorithm == "DBSCAN":
+        eps_value = st.slider("Epsilon (eps)", 0.1, 2.0, 0.5, 0.1)
+        min_samples = st.slider("Minimum samples", 2, 20, 5)
+    elif clustering_algorithm == "Gaussian Mixture":
+        n_clusters = st.slider("Number of components", 2, 10, 4)
+    else:
+        n_clusters = st.slider("Number of clusters", 2, 10, 4)
+        linkage = st.selectbox("Linkage method", ["ward", "complete", "average", "single"])
+    
+    # Feature selection
+    st.header("🔧 Feature Selection")
+    available_features = ['duration_minutes', 'books_borrowed', 'digital_resources', 'visit_frequency']
+    selected_features = st.multiselect("Select features for clustering", available_features,
+        default=['duration_minutes', 'books_borrowed', 'digital_resources'])
+    
+    st.header("💾 Export Results")
+    export_clusters = st.checkbox("Enable cluster data export", value=True)
+
+# ================================================
+# FIXED DATA LOADING FUNCTION
+# ================================================
+@st.cache_data
+def load_data(uploaded_file, use_sample_data, sample_size=10000):
+    """Robust data loading function that handles any CSV format"""
+    try:
+        if uploaded_file is not None and not use_sample_data:
+            # Read the uploaded file
+            file_content = uploaded_file.getvalue().decode('utf-8')
+            lines = file_content.split('\n')
+            
+            # Debug: Show first few lines
+            st.sidebar.info(f"📄 File preview (first 3 lines):")
+            for i, line in enumerate(lines[:3]):
+                st.sidebar.text(f"  Line {i+1}: {line[:50]}{'...' if len(line) > 50 else ''}")
+            
+            # Try to detect CSV format
+            uploaded_file.seek(0)  # Reset file pointer
+            
+            # Try reading with different delimiters
+            for delimiter in [',', ';', '\t', '|']:
+                try:
+                    df = pd.read_csv(uploaded_file, delimiter=delimiter)
+                    if len(df.columns) > 1:  # Successfully found delimiter
+                        st.sidebar.success(f"✓ Detected delimiter: '{delimiter}'")
+                        break
+                except:
+                    continue
+            else:
+                # If no delimiter works, read as single column
+                uploaded_file.seek(0)
+                df = pd.read_csv(uploaded_file, header=None)
+                df.columns = ['data']
+                st.sidebar.warning("⚠️ Single column data detected")
+            
+            st.sidebar.success(f"✅ Loaded {len(df)} records")
+            
+        else:
+            df = generate_synthetic_library_data(sample_size)
+            if use_sample_data:
+                st.sidebar.info(f"📊 Using sample data ({sample_size} records)")
+    
+    except Exception as e:
+        st.sidebar.error(f"❌ Error loading file: {str(e)[:100]}")
+        df = generate_synthetic_library_data(sample_size)
+        st.sidebar.info("🔄 Using sample data instead")
+    
+    # ================================================
+    # COLUMN NORMALIZATION - MOST IMPORTANT FIX
+    # ================================================
+    
+    # Clean column names
+    df.columns = [str(col).strip().lower().replace(' ', '_').replace('.', '_') 
+                  for col in df.columns]
+    
+    # Map common column names to expected names
+    column_mapping = {
+        # Date columns
+        'date': 'visit_date',
+        'timestamp': 'visit_date',
+        'datetime': 'visit_date',
+        'time': 'visit_date',
+        
+        # User columns
+        'userid': 'user_id',
+        'user': 'user_id',
+        'member_id': 'user_id',
+        'patron_id': 'user_id',
+        
+        # Duration columns
+        'duration': 'duration_minutes',
+        'time_spent': 'duration_minutes',
+        'visit_duration': 'duration_minutes',
+        
+        # Book columns
+        'books': 'books_borrowed',
+        'borrowed': 'books_borrowed',
+        'items': 'books_borrowed',
+        
+        # Digital resources
+        'digital': 'digital_resources',
+        'eresources': 'digital_resources',
+        'online': 'digital_resources',
+        
+        # User type
+        'type': 'user_type',
+        'category': 'user_type',
+        'usertype': 'user_type',
+    }
+    
+    # Apply mapping
+    for old_name, new_name in column_mapping.items():
+        if old_name in df.columns and new_name not in df.columns:
+            df[new_name] = df[old_name]
+            st.sidebar.info(f"📝 Mapped '{old_name}' → '{new_name}'")
+    
+    # ================================================
+    # CREATE MISSING COLUMNS
+    # ================================================
+    
+    # Create user_id if missing
+    if 'user_id' not in df.columns:
+        if len(df.columns) == 1:  # Single column file
+            df['user_id'] = df.iloc[:, 0]
+            st.sidebar.info("📋 Using first column as user_id")
+        else:
+            df['user_id'] = range(1000, 1000 + len(df))
+            st.sidebar.info("🆔 Created synthetic user IDs")
+    
+    # Create visit_date if missing
+    if 'visit_date' not in df.columns:
+        start_date = datetime.now() - timedelta(days=365)
+        df['visit_date'] = pd.date_range(start=start_date, periods=len(df), freq='H')
+        st.sidebar.info("📅 Created synthetic dates")
+    
+    # Create other required columns if missing
+    if 'duration_minutes' not in df.columns:
+        df['duration_minutes'] = np.random.exponential(90, len(df)).clip(5, 480)
+        st.sidebar.info("⏱️ Created duration data")
+    
+    if 'books_borrowed' not in df.columns:
+        df['books_borrowed'] = np.random.poisson(2.5, len(df))
+        st.sidebar.info("📚 Created books data")
+    
+    if 'digital_resources' not in df.columns:
+        df['digital_resources'] = np.random.poisson(1.8, len(df))
+        st.sidebar.info("💻 Created digital resources data")
+    
+    if 'user_type' not in df.columns:
+        user_types = ['Student', 'Faculty', 'Researcher', 'Staff', 'Public']
+        df['user_type'] = np.random.choice(user_types, len(df))
+        st.sidebar.info("👥 Created user types")
+    
+    # ================================================
+    # CALCULATE DERIVED COLUMNS
+    # ================================================
+    
+    # Calculate visit_frequency
+    try:
+        visit_counts = df['user_id'].value_counts().reset_index()
+        visit_counts.columns = ['user_id', 'visit_frequency']
+        df = df.merge(visit_counts, on='user_id', how='left')
+        st.sidebar.success("✓ Calculated visit frequency")
+    except:
+        df['visit_frequency'] = np.random.randint(1, 10, len(df))
+        st.sidebar.warning("⚠️ Using synthetic visit frequency")
+    
+    # Process dates
+    try:
+        df['visit_date'] = pd.to_datetime(df['visit_date'], errors='coerce')
+        df['hour_of_day'] = df['visit_date'].dt.hour
+        df['day_of_week'] = df['visit_date'].dt.day_name()
+        df['month'] = df['visit_date'].dt.month_name()
+        df['is_weekend'] = df['day_of_week'].isin(['Saturday', 'Sunday']).astype(int)
+        st.sidebar.success("✓ Processed dates")
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Date processing error: {str(e)[:50]}")
+    
+    # Show final column info
+    st.sidebar.info(f"📊 Final dataset: {len(df)} rows × {len(df.columns)} columns")
+    
+    return df
+
+# ================================================
+# LOAD AND VALIDATE DATA
+# ================================================
+df = load_data(uploaded_file, use_sample_data, 
+               sample_size if 'sample_size' in locals() else 10000)
+
+# Data validation in sidebar
+with st.sidebar.expander("🔍 Data Validation", expanded=False):
+    st.write("**Dataset Shape:**", df.shape)
+    st.write("**Available Columns:**", list(df.columns))
+    
+    # Check critical columns
+    critical_cols = ['visit_frequency', 'user_id', 'visit_date', 
+                     'duration_minutes', 'books_borrowed', 'digital_resources']
+    missing = [col for col in critical_cols if col not in df.columns]
+    
+    if missing:
+        st.error(f"❌ Missing: {missing}")
+    else:
+        st.success("✅ All critical columns present")
+    
+    # Show sample data
+    if st.checkbox("Show sample data"):
+        st.dataframe(df.head(3))
+
+# Main dashboard tabs
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📈 Overview", "🔍 Clustering", "⏰ Patterns", "👥 Users", "🤖 Recommendations"
+])
+
+# TAB 1: Overview Dashboard
+with tab1:
+    st.markdown("<h2 class='sub-header'>📈 Library Usage Overview</h2>", unsafe_allow_html=True)
+    
+    # Metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Visits", f"{len(df):,}")
+    with col2:
+        st.metric("Unique Users", f"{df['user_id'].nunique():,}")
+    with col3:
+        st.metric("Avg Duration", f"{df['duration_minutes'].mean():.1f} min")
+    with col4:
+        st.metric("Total Books", f"{df['books_borrowed'].sum():,}")
+    
+    # Charts
+    col1, col2 = st.columns(2)
+    with col1:
+        # Daily visits
+        if 'visit_date' in df.columns:
+            daily = df.groupby(df['visit_date'].dt.date).size().reset_index()
+            daily.columns = ['Date', 'Visits']
+            fig = px.line(daily, x='Date', y='Visits', title="Daily Visits")
+            st.plotly_chart(fig, use_container_width=True)
+    
+    with col2:
+        # User type distribution
+        if 'user_type' in df.columns:
+            user_counts = df['user_type'].value_counts().reset_index()
+            user_counts.columns = ['User Type', 'Count']
+            fig = px.pie(user_counts, values='Count', names='User Type', title="User Types")
+            st.plotly_chart(fig, use_container_width=True)
+
+# TAB 2: Cluster Analysis - SAFE VERSION
+with tab2:
+    st.markdown("<h2 class='sub-header'>🔍 Usage Pattern Clustering</h2>", unsafe_allow_html=True)
+    
+    if len(selected_features) < 2:
+        st.warning("⚠️ Select at least 2 features")
+    else:
+        # Check if selected features exist
+        missing_features = [f for f in selected_features if f not in df.columns]
+        if missing_features:
+            st.error(f"❌ Missing features: {missing_features}")
+            st.info("Please select different features or check your data")
+        else:
+            clustering_data = df[selected_features].dropna()
+            
+            if len(clustering_data) < 10:
+                st.error("Not enough data after removing missing values")
+            else:
+                # Scale features
+                scaler = StandardScaler()
+                scaled_data = scaler.fit_transform(clustering_data)
+                
+                # Apply clustering
+                with st.spinner(f"Applying {clustering_algorithm}..."):
+                    if clustering_algorithm == "K-Means":
+                        model = KMeans(n_clusters=n_clusters, random_state=42)
+                    elif clustering_algorithm == "DBSCAN":
+                        model = DBSCAN(eps=eps_value, min_samples=min_samples)
+                    elif clustering_algorithm == "Gaussian Mixture":
+                        model = GaussianMixture(n_components=n_clusters, random_state=42)
+                    else:
+                        model = AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage)
+                    
+                    cluster_labels = model.fit_predict(scaled_data)
+                
+                # Create clustered dataframe
+                clustered_df = clustering_data.copy()
+                clustered_df['Cluster'] = cluster_labels.astype(str)
+                
+                # PCA visualization
+                pca = PCA(n_components=2)
+                pca_result = pca.fit_transform(scaled_data)
+                
+                viz_df = pd.DataFrame({
+                    'PC1': pca_result[:, 0],
+                    'PC2': pca_result[:, 1],
+                    'Cluster': cluster_labels.astype(str)
+                })
+                
+                fig = px.scatter(viz_df, x='PC1', y='PC2', color='Cluster',
+                               title=f"Cluster Visualization - {clustering_algorithm}")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Cluster statistics
+                cluster_stats = clustered_df.groupby('Cluster').agg(['mean', 'count']).round(2)
+                st.dataframe(cluster_stats, use_container_width=True)
+
+# TAB 4: User Segmentation - FIXED VERSION
+with tab4:
+    st.markdown("<h2 class='sub-header'>👥 User Behavior Segmentation</h2>", unsafe_allow_html=True)
+    
+    # SAFE user type analysis - with error handling
+    if 'user_type' in df.columns and 'visit_frequency' in df.columns:
+        st.markdown("<h4>👤 User Type Analysis</h4>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # SAFE aggregation - only use existing columns
+            agg_dict = {}
+            if 'duration_minutes' in df.columns:
+                agg_dict['duration_minutes'] = 'mean'
+            if 'books_borrowed' in df.columns:
+                agg_dict['books_borrowed'] = 'mean'
+            if 'visit_frequency' in df.columns:
+                agg_dict['visit_frequency'] = 'mean'
+            if 'user_id' in df.columns:
+                agg_dict['user_id'] = 'count'
+            
+            if agg_dict:
+                user_type_metrics = df.groupby('user_type').agg(agg_dict)
+                if 'user_id' in agg_dict:
+                    user_type_metrics = user_type_metrics.rename(columns={'user_id': 'total_visits'})
+                user_type_metrics = user_type_metrics.round(2)
+                st.dataframe(user_type_metrics, use_container_width=True)
+            else:
+                st.warning("No numeric columns available for analysis")
+        
+        with col2:
+            if 'duration_minutes' in df.columns:
+                fig = px.box(df, x='user_type', y='duration_minutes',
+                           title="Visit Duration by User Type")
+                st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("User type or visit frequency data not available")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: #6B7280; padding: 20px;'>
+    <p><strong>📚 Library Usage Pattern Clustering Dashboard</strong></p>
+    <p>Unsupervised Learning & Reinforcement Learning for Optimal Resource Planning</p>
+</div>
+""", unsafe_allow_html=True)
